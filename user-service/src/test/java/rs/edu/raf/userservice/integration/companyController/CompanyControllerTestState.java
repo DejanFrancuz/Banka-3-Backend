@@ -1,4 +1,4 @@
-package rs.edu.raf.userservice.integration.contactController;
+package rs.edu.raf.userservice.integration.companyController;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -9,8 +9,9 @@ import org.springframework.stereotype.Component;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class ContactControllerTestsState {
+public class CompanyControllerTestState {
 
-    String jwtToken;
-    Long contactId;
+        String jwtToken;
+        Long companyId;
+        String email;
 }
