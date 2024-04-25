@@ -1,37 +1,40 @@
-//package rs.edu.raf.userservice.e2e.byStoks;
-//
-//import com.fasterxml.jackson.core.JsonProcessingException;
-//import com.fasterxml.jackson.databind.ObjectMapper;
-//import io.cucumber.java.en.And;
-//import io.cucumber.java.en.Given;
-//import io.cucumber.java.en.Then;
-//import io.cucumber.java.en.When;
-//import org.springframework.beans.factory.annotation.Autowired;
-//import org.springframework.http.*;
-//import org.springframework.test.web.servlet.MockMvc;
-//import org.springframework.test.web.servlet.MvcResult;
-//import org.springframework.test.web.servlet.ResultActions;
-//import org.springframework.web.client.RestTemplate;
-//
-//import rs.edu.raf.userservice.domain.dto.login.LoginRequest;
-//import rs.edu.raf.userservice.e2e.byStoks.helper.BuyStockDto;
-//import rs.edu.raf.userservice.e2e.byStoks.helper.StockDto;
-//import rs.edu.raf.userservice.integration.LoginResponseForm;
-//
-//import static org.junit.jupiter.api.Assertions.*;
-//import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-//import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-//import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-//
-//public class BuyStoksTestsSteps extends BuyStoksTestsConfig{
-//
-//    @Autowired
-//    private MockMvc mockMvc;
-//
-//    @Autowired
-//    private ObjectMapper objectMapper;
-//
-//    private String jwtToken;
+package rs.edu.raf.userservice.e2e.byStoks;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.cucumber.java.en.And;
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.*;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.client.RestTemplate;
+
+import rs.edu.raf.userservice.domain.dto.login.LoginRequest;
+import rs.edu.raf.userservice.domain.dto.user.UserDto;
+import rs.edu.raf.userservice.e2e.byStoks.helper.*;
+import rs.edu.raf.userservice.integration.LoginResponseForm;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+public class BuyStoksTestsSteps extends BuyStoksTestsConfig{
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    private String jwtToken;
 //
 //    private CompanyAccountDto companyAccountDto;
 //    private CompanyAccountDto afterBuyCompanyAccountDto;
@@ -176,4 +179,171 @@
 //            fail(e.getMessage());
 //        }
 //    }
-//}
+
+    private UserDto userDto;
+    private String adminJwtToken;
+    private UserAccountDto userAccountDtoBeforeCredit;
+    @Given("Korisnik se loguje na aplikaciju sa email {string} i sifrom {string}")
+    public void korisnikSeLogujeNaAplikacijuSaEmailISifrom(String email, String password) {
+        try{
+            LoginRequest loginRequest = new LoginRequest();
+            loginRequest.setEmail(email);
+            loginRequest.setPassword(password);
+
+            LoginRequest adminRequest = new LoginRequest();
+            adminRequest.setEmail("admin@admin.com");
+            adminRequest.setPassword("admin1234");
+
+            String adminLoginRequestJson = objectMapper.writeValueAsString(adminRequest);
+
+            ResultActions adminActions = mockMvc.perform(
+                    post("/api/v1/employee/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .accept(MediaType.APPLICATION_JSON)
+                            .content(adminLoginRequestJson)
+
+            ).andExpect(status().isOk());
+
+            MvcResult adminResult = adminActions.andReturn();
+            String loginResponse = adminResult.getResponse().getContentAsString();
+            LoginResponseForm loginResponseForm = objectMapper.readValue(loginResponse, LoginResponseForm.class);
+            adminJwtToken = loginResponseForm.getJwt();
+
+            String loginRequestJson = objectMapper.writeValueAsString(loginRequest);
+
+            ResultActions resultActions = mockMvc.perform(
+                    post("/api/v1/user/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .accept(MediaType.APPLICATION_JSON)
+                            .content(loginRequestJson)
+
+            ).andExpect(status().isOk());
+
+            ResultActions findbyEmail = mockMvc.perform(
+                    get("/api/v1/user/findByEmail/" + email)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .accept(MediaType.APPLICATION_JSON)
+                            .header("Authorization", "Bearer " + adminJwtToken)
+            ).andExpect(status().isOk());
+
+            MvcResult result = findbyEmail.andReturn();
+            String response = result.getResponse().getContentAsString();
+            userDto = objectMapper.readValue(response, UserDto.class);
+        } catch (Exception e) {
+            fail(e.getMessage());
+        }
+    }
+
+
+    @And("korisnik cekira balans na svom {string} racunu")
+    public void korisnikCekiraBalansNaSvomRacunu(String mark) throws JsonProcessingException {
+        RestTemplate restTemplate = new RestTemplate();
+        String url = "http://localhost:8082/api/v1/account/getByUser/" + userDto.getId();
+
+        ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            String responseBody = response.getBody();
+            List<UserAccountDto> accountDtos = objectMapper.readValue(responseBody, new TypeReference<List<UserAccountDto>>(){});
+            for (UserAccountDto userAccountDto: accountDtos) {
+                if (userAccountDto.getCurrency().getMark().equals(mark)) {
+                    userAccountDtoBeforeCredit = userAccountDto;
+                }
+            }
+            System.out.println(userAccountDtoBeforeCredit);
+        } else {
+            fail(response.getStatusCode().toString());
+        }
+    }
+
+    @When("korisnik salje zahtev za kredit")
+    public void korisnikSaljeZahtevZaKredit() {
+        CreditRequestCreateDto creditRequestCreateDto = new CreditRequestCreateDto();
+        creditRequestCreateDto.setAmount(1000.0);
+        creditRequestCreateDto.setPaymentPeriod(12);
+        creditRequestCreateDto.setUserId(userDto.getId());
+        creditRequestCreateDto.setAccountNumber(userAccountDtoBeforeCredit.getAccountNumber());
+        creditRequestCreateDto.setName("Kes kredit");
+        creditRequestCreateDto.setEmployed(true);
+        creditRequestCreateDto.setApplianceReason("Kredit za stan");
+        creditRequestCreateDto.setCurrencyMark(userAccountDtoBeforeCredit.getCurrency().getMark());
+        creditRequestCreateDto.setDateOfEmployment(System.currentTimeMillis());
+
+        RestTemplate restTemplate = new RestTemplate();
+        String url = "http://localhost:8082/api/v1/credit-request";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<CreditRequestCreateDto> requestEntity = new HttpEntity<>(creditRequestCreateDto, headers);
+        System.out.println(requestEntity.getBody().toString());
+
+        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, String.class);
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            System.out.println(response.getBody());
+        } else {
+            fail(response.getStatusCode().toString());
+        }
+    }
+
+    @Then("Zaposleni se loguje na aplikaciju i odobrava zahtev")
+    public void zaposleniSeLogujeNaAplikacijuIOdobravaZahtev() throws JsonProcessingException {
+        RestTemplate restTemplate = new RestTemplate();
+        String url = "http://localhost:8082/api/v1/credit-request";
+
+        ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            String responseBody = response.getBody();
+            CreditRequestDto creditReqDto;
+            List<CreditRequestDto> creditRequestCreateDtos = objectMapper.readValue(responseBody, new TypeReference<List<CreditRequestDto>>(){});
+            creditReqDto = creditRequestCreateDtos.stream().max((c1, c2) -> c1.getCreditRequestId().compareTo(c2.getCreditRequestId())).get();
+
+
+            ProcessCreditRequestDto processCreditRequestDto = new ProcessCreditRequestDto();
+            processCreditRequestDto.setAccepted(true);
+            processCreditRequestDto.setCreditRequestId(creditReqDto.getCreditRequestId());
+            processCreditRequestDto.setEmployeeId(1l);
+
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<ProcessCreditRequestDto> requestEntity = new HttpEntity<>(processCreditRequestDto, headers);
+            System.out.println(requestEntity.getBody().toString());
+
+            ResponseEntity<String> responseCredit = restTemplate.exchange(url, HttpMethod.PUT, requestEntity, String.class);
+
+
+
+        } else {
+            fail(response.getStatusCode().toString());
+        }
+    }
+
+    @And("korisnik cekira balans")
+    public void korisnikCekiraBalans() throws JsonProcessingException, InterruptedException {
+        Thread.sleep(35000);
+        RestTemplate restTemplate = new RestTemplate();
+        String url = "http://localhost:8082/api/v1/account/getByUser/" + userDto.getId();
+
+        ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            String responseBody = response.getBody();
+            UserAccountDto userAccountAfterCredit = null;
+            List<UserAccountDto> accountDtos = objectMapper.readValue(responseBody, new TypeReference<List<UserAccountDto>>(){});
+            for (UserAccountDto userAccountDto: accountDtos) {
+                if (userAccountDto.getCurrency().getMark().equals("EUR")) {
+                    userAccountAfterCredit = userAccountDto;
+                }
+            }
+
+            assertTrue(userAccountDtoBeforeCredit.getAvailableBalance().compareTo(userAccountAfterCredit.getAvailableBalance()) == -1);
+        } else {
+            fail(response.getStatusCode().toString());
+        }
+
+    }
+
+
+}
